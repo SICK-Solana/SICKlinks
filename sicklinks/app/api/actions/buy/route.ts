@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       type: "action",
-      icon: "https://blinks.sickfreak.club/proto.png",
+      icon: "gif.gif",
       title: `Buy ${crateData.name}`,
       description: "Buy Crate using Sick & jupiter , Buy now and escape the matrix",
       label: "Buy",
