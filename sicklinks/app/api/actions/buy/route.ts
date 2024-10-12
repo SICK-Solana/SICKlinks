@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { createJupiterApiClient, QuoteGetRequest, QuoteResponse } from "@jup-ag/api";
 import tokenData from '../../../tokens.json';
-const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
+const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=a95e3765-35c7-459e-808a-9135a21acdf6');
 const jupiterQuoteApi = createJupiterApiClient();
 // Token mint address mapping
 // const TOKEN_MINT_ADDRESSES = {
@@ -89,13 +89,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       type: "action",
       icon: "https://blinks.sickfreak.club/proto.png",
-      title: `Swap for ${crateData.name}`,
-      description: "Swap tokens using Jupiter aggregator",
-      label: "Swap",
+      title: `Buy ${crateData.name}`,
+      description: "Buy Crate using Sick & jupiter , Buy now and escape the matrix",
+      label: "Buy",
       links: {
         actions: [
           {
-            label: "Perform Swap",
+            label: "Buy Crate",
             href: "/api/actions/buy?crateId=" + crateId,
             parameters: [
               {
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
   const { account, data } = body;
   const { inputAmount, inputCurrency } = data;
   const crateId = request.nextUrl.searchParams.get('crateId');
-  if (!account || !crateId ) {
+  if (!account || !crateId) {
     return NextResponse.json({ error: "User publickey and crate ID are required" }, { status: 400 });
   }
 
@@ -164,29 +164,61 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No supported tokens found in the crate" }, { status: 400 });
     }
 
-    const swapObjs = await Promise.all(quoteResults.map(({ quote }) => 
-      getSwapObj(account, quote)
-    ));
+    const publicKey = new PublicKey(account);
+    const transactions = [];
 
-    const transactions = swapObjs.map(swapObj => {
+    // Create swap transactions
+    for (const quoteResult of quoteResults) {
+      const swapObj = await getSwapObj(publicKey.toString(), quoteResult.quote);
       const swapTransactionBuf = Buffer.from(swapObj.swapTransaction, "base64");
-      return VersionedTransaction.deserialize(swapTransactionBuf);
-    });
+      const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+      transactions.push(transaction);
+    }
 
-    // Add transfer transactions (keep existing code for transfers)
+    // Create transfer transactions
+    const recentBlockhash = await connection.getLatestBlockhash();
 
-    // Serialize all transactions
-    const serializedTransactions = transactions.map(tx => 
-      Buffer.from(tx.serialize()).toString('base64')
+    const transferToStaticWallet = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: publicKey,
+        recentBlockhash: recentBlockhash.blockhash,
+        instructions: [
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: new PublicKey("SicKRgxa9vRCfMy4QYzKcnJJvDy1ojxJiNu3PRnmBLs"),
+            lamports: 1000000,  // 1,000,000 lamports
+          })
+        ],
+      }).compileToV0Message()
     );
 
+    const transferToCreatorWallet = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: publicKey,
+        recentBlockhash: recentBlockhash.blockhash,
+        instructions: [
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: new PublicKey(crateData.creator.walletAddress),
+            lamports: 1000000, 
+          })
+        ],
+      }).compileToV0Message()
+    );
+
+    transactions.push(transferToStaticWallet);
+    transactions.push(transferToCreatorWallet);
+
+    // Prepare the response with all transactions
+    const transactionsBase64 = transactions.map(tx => tx.serialize().toString());
+
     return NextResponse.json({
-      transaction: serializedTransactions[0],
-      message: "Swap transactions ready for signing",
+      transactions: transactionsBase64,
+      message: "All transactions ready for signing",
       unsupportedTokens: unsupportedTokens.length > 0 ? unsupportedTokens : undefined,
     });
   } catch (error) {
-    console.error("Error preparing swap:", error);
-    return NextResponse.json({ error: "Failed to prepare swap", details: (error as Error).message }, { status: 500 });
+    console.error("Error preparing transactions:", error);
+    return NextResponse.json({ error: "Failed to prepare transactions", details: (error as Error).message }, { status: 500 });
   }
 }
