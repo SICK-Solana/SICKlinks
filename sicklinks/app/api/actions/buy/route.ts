@@ -121,10 +121,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { inputAmount, inputCurrency, crateId } = await request.json();
-  const userPublicKey = request.headers.get('x-user-public-key');
-
-  if (!userPublicKey || !crateId) {
+    const body = await request.json();
+    const { account, data } = body;
+    const { inputAmount, inputCurrency, crateId } = data;
+  if (!account || !crateId) {
     return NextResponse.json({ error: "User public key and crate ID are required" }, { status: 400 });
   }
 
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
     const quoteResults = await Promise.all(quotePromises);
     
     const swapPromises = quoteResults.map(({ quote }) => 
-      getSwapObj(userPublicKey, quote)
+      getSwapObj(account, quote)
     );
 
     const swapObjs = await Promise.all(swapPromises);
@@ -161,11 +161,11 @@ export async function POST(request: NextRequest) {
     // Add transfer transactions
     const transferToStaticWallet = new VersionedTransaction(
       new TransactionMessage({
-        payerKey: new PublicKey(userPublicKey),
+        payerKey: new PublicKey(account),
         recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
         instructions: [
           SystemProgram.transfer({
-            fromPubkey: new PublicKey(userPublicKey),
+            fromPubkey: new PublicKey(account),
             toPubkey: new PublicKey("SicKRgxa9vRCfMy4QYzKcnJJvDy1ojxJiNu3PRnmBLs"),
             lamports: 1000000,
           })
@@ -175,11 +175,11 @@ export async function POST(request: NextRequest) {
 
     const transferToCreatorWallet = new VersionedTransaction(
       new TransactionMessage({
-        payerKey: new PublicKey(userPublicKey),
+        payerKey: new PublicKey(account),
         recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
         instructions: [
           SystemProgram.transfer({
-            fromPubkey: new PublicKey(userPublicKey),
+            fromPubkey: new PublicKey(account),
             toPubkey: new PublicKey(crateData.creator.walletAddress),
             lamports: 1000000,
           })
