@@ -177,10 +177,9 @@ export async function POST(request: NextRequest) {
     // Prepare the response with all transactions
     // tslint:disable-next-line: no-unsafe-any
     // ts-nocheck
-    const transactionsBase64 = transactions.map(tx => {
-      return  Buffer.from(tx.serialize()).toString('base64') // Ensure this returns a Buffer
-     
-  });     
+    const serializedTransactions = transactions.map(tx => 
+      Buffer.from(tx.serialize()).toString('base64')
+    );
 
   
   
@@ -190,7 +189,7 @@ export async function POST(request: NextRequest) {
       .map(({ symbol }) => symbol);
 
     return NextResponse.json({
-      transaction: transactionsBase64,
+      transaction: serializedTransactions,
       message: "All transactions ready for signing",
       unsupportedTokens: unsupportedTokens.length > 0 ? unsupportedTokens : undefined,
     });
