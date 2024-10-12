@@ -121,6 +121,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Failed to fetch crate data" }, { status: 500 });
   }
 }
+// DO NOT FORGET TO INCLUDE THE `OPTIONS` HTTP METHOD
+// THIS WILL ENSURE CORS WORKS FOR BLINKS
+export const OPTIONS = GET;
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -187,6 +190,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to prepare swap", details: (error as Error).message }, { status: 500 });
   }
 }
-// DO NOT FORGET TO INCLUDE THE `OPTIONS` HTTP METHOD
-// THIS WILL ENSURE CORS WORKS FOR BLINKS
-export const OPTIONS = GET;
