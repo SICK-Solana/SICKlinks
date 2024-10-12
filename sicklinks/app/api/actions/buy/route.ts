@@ -146,71 +146,40 @@ export async function POST(request: NextRequest) {
       amount: (totalAmount * token.quantity) / 100
     }));
 
-    const quoteResults = [];
-    const unsupportedTokens = [];
-
-    for (const { symbol, mint, amount } of tokenAllocations) {
+    const quotePromises = tokenAllocations.map(async ({ symbol, mint, amount }) => {
       const atomicAmount = Math.floor(amount * Math.pow(10, inputDecimals));
       try {
         const quote = await getQuote(inputMint, mint, atomicAmount);
-        quoteResults.push({ outputMint: mint, quote });
+        return { outputMint: mint, quote };
       } catch (error) {
         console.warn(`Unable to get quote for token ${symbol} (${mint}):`, error);
-        unsupportedTokens.push(symbol);
+        return null;
       }
-    }
+    });
+
+    const quoteResults = (await Promise.all(quotePromises)).filter(result => result !== null);
 
     if (quoteResults.length === 0) {
       return NextResponse.json({ error: "No supported tokens found in the crate" }, { status: 400 });
     }
 
     const publicKey = new PublicKey(account);
-    const transactions = [];
 
     // Create swap transactions
-    for (const quoteResult of quoteResults) {
+    const swapPromises = quoteResults.map(async (quoteResult) => {
       const swapObj = await getSwapObj(publicKey.toString(), quoteResult.quote);
       const swapTransactionBuf = Buffer.from(swapObj.swapTransaction, "base64");
-      const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-      transactions.push(transaction);
-    }
+      return VersionedTransaction.deserialize(swapTransactionBuf);
+    });
 
-    // Create transfer transactions
-    const recentBlockhash = await connection.getLatestBlockhash();
+    const transactions = await Promise.all(swapPromises);
 
-    const transferToStaticWallet = new VersionedTransaction(
-      new TransactionMessage({
-        payerKey: publicKey,
-        recentBlockhash: recentBlockhash.blockhash,
-        instructions: [
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: new PublicKey("SicKRgxa9vRCfMy4QYzKcnJJvDy1ojxJiNu3PRnmBLs"),
-            lamports: 1000000,  // 1,000,000 lamports
-          })
-        ],
-      }).compileToV0Message()
-    );
-
-    const transferToCreatorWallet = new VersionedTransaction(
-      new TransactionMessage({
-        payerKey: publicKey,
-        recentBlockhash: recentBlockhash.blockhash,
-        instructions: [
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: new PublicKey(crateData.creator.walletAddress),
-            lamports: 1000000, 
-          })
-        ],
-      }).compileToV0Message()
-    );
-
-    transactions.push(transferToStaticWallet);
-    transactions.push(transferToCreatorWallet);
-
-    // Prepare the response with all transactions
+    // Corrected line: Remove the argument from tx.serialize()
     const transactionsBase64 = transactions.map(tx => tx.serialize().toString());
+
+    const unsupportedTokens = tokenAllocations
+      .filter(({ mint }) => !quoteResults.some(result => result.outputMint === mint))
+      .map(({ symbol }) => symbol);
 
     return NextResponse.json({
       transactions: transactionsBase64,
