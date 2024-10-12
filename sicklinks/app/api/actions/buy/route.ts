@@ -5,45 +5,43 @@ import { createJupiterApiClient, QuoteGetRequest, QuoteResponse } from "@jup-ag/
 const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
 const jupiterQuoteApi = createJupiterApiClient();
 
-// Helper functions (getQuote, getSwapObj) would be implemented here
-// For brevity, I'm not including their implementations, but they would be the same as in your original code
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 async function getQuote(
-    inputMint: string,
-    outputMint: string,
-    amount: number
-  ) {
-    const params: QuoteGetRequest = {
-      inputMint: inputMint,
-      outputMint: outputMint,
-      amount: amount,
-      autoSlippage: true,
-      autoSlippageCollisionUsdValue: 1_000,
-      maxAutoSlippageBps: 1000,
-      minimizeSlippage: true,
-      onlyDirectRoutes: false,
-      asLegacyTransaction: false,
-    };
-    const quote = await jupiterQuoteApi.quoteGet(params);
-    if (!quote) {
-      throw new Error("unable to quote");
-    }
-    return quote;
+  inputMint: string,
+  outputMint: string,
+  amount: number
+) {
+  const params: QuoteGetRequest = {
+    inputMint: inputMint,
+    outputMint: outputMint,
+    amount: amount,
+    autoSlippage: true,
+    autoSlippageCollisionUsdValue: 1_000,
+    maxAutoSlippageBps: 1000,
+    minimizeSlippage: true,
+    onlyDirectRoutes: false,
+    asLegacyTransaction: false,
+  };
+  const quote = await jupiterQuoteApi.quoteGet(params);
+  if (!quote) {
+    throw new Error("unable to quote");
   }
-  
-   async function getSwapObj(wallet: string, quote: QuoteResponse) {
-   
-    const swapObj = await jupiterQuoteApi.swapPost({
-      swapRequest: {
-        quoteResponse: quote,
-        userPublicKey: wallet,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: "auto",
-      },
-    });
-   
-    return swapObj;
-  }
+  return quote;
+}
+
+async function getSwapObj(wallet: string, quote: QuoteResponse) {
+  const swapObj = await jupiterQuoteApi.swapPost({
+    swapRequest: {
+      quoteResponse: quote,
+      userPublicKey: wallet,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: "auto",
+    },
+  });
+  return swapObj;
+}
 
 export async function GET(request: NextRequest) {
   return NextResponse.json({
@@ -64,9 +62,13 @@ export async function GET(request: NextRequest) {
               type: "number"
             },
             {
-              name: "inputMint",
-              label: "Input Token",
-              type: "text"
+              name: "inputCurrency",
+              label: "Input Currency",
+              type: "select",
+              options: [
+                { label: "SOL", value: "SOL" },
+                { label: "USDC", value: "USDC" }
+              ]
             },
             {
               name: "outputMints",
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { inputAmount, inputMint, outputMints } = await request.json();
+  const { inputAmount, inputCurrency, outputMints } = await request.json();
   const userPublicKey = request.headers.get('x-user-public-key');
 
   if (!userPublicKey) {
@@ -91,14 +93,18 @@ export async function POST(request: NextRequest) {
   try {
     const outputMintsArray = outputMints.split(',');
     const swapAmount = parseFloat(inputAmount) / outputMintsArray.length;
+    const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
+    const inputDecimals = inputCurrency === 'USDC' ? 6 : 9;
 
-    const quotePromises = outputMintsArray.map((outputMint: string) => 
-      getQuote(inputMint, outputMint, Math.floor(swapAmount * 1e9)) // Assuming SOL input
-    );
+    const quotePromises = outputMintsArray.map(async (outputMint: string) => {
+      const atomicAmount = Math.floor(swapAmount * Math.pow(10, inputDecimals));
+      const quote = await getQuote(inputMint, outputMint, atomicAmount);
+      return { outputMint, quote };
+    });
 
-    const quotes = await Promise.all(quotePromises);
+    const quoteResults = await Promise.all(quotePromises);
     
-    const swapPromises = quotes.map(quote => 
+    const swapPromises = quoteResults.map(({ quote }) => 
       getSwapObj(userPublicKey, quote)
     );
 
@@ -132,14 +138,8 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json({
-      transaction: serializedTransactions[0], // First transaction
+      transactions: serializedTransactions,
       message: "Swap transactions ready for signing",
-      links: {
-        next: {
-          type: "post",
-          href: "/api/swap/complete"
-        }
-      }
     });
   } catch (error) {
     console.error("Error preparing swap:", error);
