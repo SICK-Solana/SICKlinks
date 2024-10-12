@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { createJupiterApiClient, QuoteGetRequest, QuoteResponse } from "@jup-ag/api";
-
+import tokenData from '../../../tokens.json';
 const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
 const jupiterQuoteApi = createJupiterApiClient();
-
+// Token mint address mapping
+// const TOKEN_MINT_ADDRESSES = {
+//   '$WIF': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+//   'POPCAT': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+//   'TRUMP': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+// };
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -43,7 +48,7 @@ async function getQuote(
     outputMint: outputMint,
     amount: amount,
     autoSlippage: true,
-    autoSlippageCollisionUsdValue: 1_000,
+    autoSlippageCollisionUsdValue: 1000,
     maxAutoSlippageBps: 1000,
     minimizeSlippage: true,
     onlyDirectRoutes: false,
@@ -118,66 +123,67 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    const body = await request.json();
-    const { account, data } = body;
-    const { inputAmount, inputCurrency } = data;
-    const crateId = request.nextUrl.searchParams.get('crateId');
-    if (!account || !crateId ) {
-      return NextResponse.json({ error: "User publickey and crate ID are required" }, { status: 400 });
+  const body = await request.json();
+  const { account, data } = body;
+  const { inputAmount, inputCurrency } = data;
+  const crateId = request.nextUrl.searchParams.get('crateId');
+  if (!account || !crateId ) {
+    return NextResponse.json({ error: "User publickey and crate ID are required" }, { status: 400 });
+  }
+
+  try {
+    const crateData = await fetchCrateData(crateId);
+    const totalAmount = parseFloat(inputAmount);
+    const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
+    const inputDecimals = inputCurrency === 'USDC' ? 6 : 9;
+
+    const tokenAllocations = crateData.tokens.map(token => ({
+      symbol: token.symbol,
+      mint: tokenData.find(t => t.symbol === token.symbol)?.address || '',
+      amount: (totalAmount * token.quantity) / 100
+    }));
+
+    const quoteResults = [];
+    const unsupportedTokens = [];
+
+    for (const { symbol, mint, amount } of tokenAllocations) {
+      const atomicAmount = Math.floor(amount * Math.pow(10, inputDecimals));
+      try {
+        const quote = await getQuote(inputMint, mint, atomicAmount);
+        quoteResults.push({ outputMint: mint, quote });
+      } catch (error) {
+        console.warn(`Unable to get quote for token ${symbol} (${mint}):`, error);
+        unsupportedTokens.push(symbol);
+      }
     }
 
-    try {
-      const crateData = await fetchCrateData(crateId);
-      const totalAmount = parseFloat(inputAmount);
-      const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
-      const inputDecimals = inputCurrency === 'USDC' ? 6 : 9;
-
-      const tokenAllocations = crateData.tokens.map(token => ({
-        mint: token.id,
-        amount: (totalAmount * token.quantity) / 100
-      }));
-
-      const quoteResults = [];
-      const unsupportedTokens = [];
-
-      for (const { mint, amount } of tokenAllocations) {
-        const atomicAmount = Math.floor(amount * Math.pow(10, inputDecimals));
-        try {
-          const quote = await getQuote(inputMint, mint, atomicAmount);
-          quoteResults.push({ outputMint: mint, quote });
-        } catch (error) {
-          console.warn(`Unable to get quote for token ${mint}:`, error);
-          unsupportedTokens.push(mint);
-        }
-      }
-
-      if (quoteResults.length === 0) {
-        return NextResponse.json({ error: "No supported tokens found in the crate" }, { status: 400 });
-      }
-
-      const swapObjs = await Promise.all(quoteResults.map(({ quote }) => 
-        getSwapObj(account, quote)
-      ));
-
-      const transactions = swapObjs.map(swapObj => {
-        const swapTransactionBuf = Buffer.from(swapObj.swapTransaction, "base64");
-        return VersionedTransaction.deserialize(swapTransactionBuf);
-      });
-
-      // Add transfer transactions (keep existing code for transfers)
-
-      // Serialize all transactions
-      const serializedTransactions = transactions.map(tx => 
-        Buffer.from(tx.serialize()).toString('base64')
-      );
-
-      return NextResponse.json({
-        transaction: serializedTransactions[0],
-        message: "Swap transactions ready for signing",
-        unsupportedTokens: unsupportedTokens.length > 0 ? unsupportedTokens : undefined,
-      });
-    } catch (error) {
-      console.error("Error preparing swap:", error);
-      return NextResponse.json({ error: "Failed to prepare swap" }, { status: 500 });
+    if (quoteResults.length === 0) {
+      return NextResponse.json({ error: "No supported tokens found in the crate" }, { status: 400 });
     }
+
+    const swapObjs = await Promise.all(quoteResults.map(({ quote }) => 
+      getSwapObj(account, quote)
+    ));
+
+    const transactions = swapObjs.map(swapObj => {
+      const swapTransactionBuf = Buffer.from(swapObj.swapTransaction, "base64");
+      return VersionedTransaction.deserialize(swapTransactionBuf);
+    });
+
+    // Add transfer transactions (keep existing code for transfers)
+
+    // Serialize all transactions
+    const serializedTransactions = transactions.map(tx => 
+      Buffer.from(tx.serialize()).toString('base64')
+    );
+
+    return NextResponse.json({
+      transaction: serializedTransactions[0],
+      message: "Swap transactions ready for signing",
+      unsupportedTokens: unsupportedTokens.length > 0 ? unsupportedTokens : undefined,
+    });
+  } catch (error) {
+    console.error("Error preparing swap:", error);
+    return NextResponse.json({ error: "Failed to prepare swap", details: (error as Error).message }, { status: 500 });
+  }
 }
