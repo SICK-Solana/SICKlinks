@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
         actions: [
           {
             label: "Perform Swap",
-            href: "/api/swap",
+            href: "/api/actions/buy",
             parameters: [
               {
                 name: "inputAmount",
