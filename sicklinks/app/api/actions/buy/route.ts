@@ -178,9 +178,10 @@ export async function POST(request: NextRequest) {
     // tslint:disable-next-line: no-unsafe-any
     // ts-nocheck
     const transactionsBase64 = transactions.map(tx => {
-      const serializedTx = tx.serialize(); // Ensure this returns a Buffer
-      return serializedTx.toString() // Convert Buffer to base64 string
-  });
+      return  Buffer.from(tx.serialize()).toString('base64') // Ensure this returns a Buffer
+     
+  });     
+
   
   
 
