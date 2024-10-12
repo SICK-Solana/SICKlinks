@@ -37,7 +37,7 @@ async function getQuote(
   inputMint: string,
   outputMint: string,
   amount: number
-) {
+): Promise<QuoteResponse> {
   const params: QuoteGetRequest = {
     inputMint: inputMint,
     outputMint: outputMint,
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
     const inputDecimals = inputCurrency === 'USDC' ? 6 : 9;
 
     const tokenAllocations = crateData.tokens.map(token => ({
-      mint: token.id, // Assuming token.id is the mint address
+      mint: token.id,
       amount: (totalAmount * token.quantity) / 100
     }));
 
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json({
-      transactions: serializedTransactions,
+      transaction: serializedTransactions[0],
       message: "Swap transactions ready for signing",
     });
   } catch (error) {
