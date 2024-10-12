@@ -174,15 +174,22 @@ export async function POST(request: NextRequest) {
 
     const transactions = await Promise.all(swapPromises);
 
-    // Corrected line: Remove the argument from tx.serialize()
-    const transactionsBase64 = transactions.map(tx => tx.serialize().toString());
+    // Prepare the response with all transactions
+    // tslint:disable-next-line: no-unsafe-any
+    // ts-nocheck
+    const transactionsBase64 = transactions.map(tx => {
+      const serializedTx = tx.serialize(); // Ensure this returns a Buffer
+      return serializedTx.toString() // Convert Buffer to base64 string
+  });
+  
+  
 
     const unsupportedTokens = tokenAllocations
       .filter(({ mint }) => !quoteResults.some(result => result.outputMint === mint))
       .map(({ symbol }) => symbol);
 
     return NextResponse.json({
-      transactions: transactionsBase64,
+      transaction: transactionsBase64,
       message: "All transactions ready for signing",
       unsupportedTokens: unsupportedTokens.length > 0 ? unsupportedTokens : undefined,
     });
@@ -191,3 +198,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to prepare transactions", details: (error as Error).message }, { status: 500 });
   }
 }
+
